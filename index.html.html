@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carte Ferroviaire SNCF</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --rail-red: #e63027;
+    --rail-dark: #0a0e1a;
+    --rail-panel: #0f1525;
+    --rail-border: #1e2d4a;
+    --rail-accent: #4fc3f7;
+    --rail-green: #00e676;
+    --rail-yellow: #ffd54f;
+    --rail-text: #b0bec5;
+    --rail-white: #e8eaf6;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--rail-dark);
+    font-family: 'Rajdhani', sans-serif;
+    color: var(--rail-white);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    background: var(--rail-panel);
+    border-bottom: 2px solid var(--rail-red);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 1000;
+    flex-shrink: 0;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-badge {
+    background: var(--rail-red);
+    color: white;
+    font-weight: 700;
+    font-size: 18px;
+    padding: 4px 10px;
+    letter-spacing: 2px;
+    clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+  }
+
+  .logo-title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--rail-white);
+    text-transform: uppercase;
+  }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+  }
+
+  .status-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--rail-text);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--rail-text);
+  }
+  .dot.active { background: var(--rail-green); animation: pulse 1.5s infinite; }
+  .dot.searching { background: var(--rail-yellow); animation: pulse 0.8s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  #map-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #map { width: 100%; height: 100%; }
+
+  /* Panel info latéral */
+  #info-panel {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    width: 260px;
+    background: rgba(15, 21, 37, 0.92);
+    border: 1px solid var(--rail-border);
+    border-left: 3px solid var(--rail-accent);
+    z-index: 900;
+    backdrop-filter: blur(10px);
+  }
+
+  .panel-header {
+    background: var(--rail-border);
+    padding: 8px 14px;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--rail-accent);
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  .panel-body { padding: 12px 14px; }
+
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(30,45,74,0.5);
+    font-size: 13px;
+  }
+  .info-row:last-child { border-bottom: none; }
+
+  .info-label { color: var(--rail-text); font-size: 12px; }
+  .info-value {
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--rail-white);
+    font-size: 13px;
+    text-align: right;
+  }
+  .info-value.highlight { color: var(--rail-accent); }
+  .info-value.alert { color: var(--rail-yellow); }
+
+  /* Légende */
+  #legend {
+    position: absolute;
+    bottom: 30px;
+    left: 15px;
+    background: rgba(15, 21, 37, 0.92);
+    border: 1px solid var(--rail-border);
+    border-left: 3px solid var(--rail-red);
+    z-index: 900;
+    backdrop-filter: blur(10px);
+    min-width: 180px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: var(--rail-text);
+    border-bottom: 1px solid rgba(30,45,74,0.3);
+  }
+  .legend-item:last-child { border-bottom: none; }
+
+  .legend-line {
+    width: 24px;
+    height: 4px;
+    border-radius: 2px;
+  }
+
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid;
+    flex-shrink: 0;
+  }
+
+  /* Barre de zoom info */
+  #zoom-info {
+    position: absolute;
+    bottom: 30px;
+    right: 15px;
+    background: rgba(15, 21, 37, 0.85);
+    border: 1px solid var(--rail-border);
+    padding: 6px 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--rail-text);
+    z-index: 900;
+  }
+
+  /* Marker position */
+  .position-marker {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--rail-accent) 0%, transparent 70%);
+    border: 3px solid var(--rail-accent);
+    animation: position-pulse 2s infinite;
+    position: relative;
+  }
+
+  @keyframes position-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(79, 195, 247, 0.7); }
+    70% { box-shadow: 0 0 0 15px rgba(79, 195, 247, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(79, 195, 247, 0); }
+  }
+
+  /* Message d'erreur / alerte */
+  #alert-box {
+    display: none;
+    position: absolute;
+    top: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(230,48,39,0.15);
+    border: 1px solid var(--rail-red);
+    color: #ff8a80;
+    padding: 10px 20px;
+    font-size: 13px;
+    z-index: 1100;
+    letter-spacing: 1px;
+    text-align: center;
+    max-width: 400px;
+  }
+
+  /* Leaflet overrides */
+  .leaflet-popup-content-wrapper {
+    background: var(--rail-panel);
+    border: 1px solid var(--rail-border);
+    border-radius: 0;
+    color: var(--rail-white);
+    font-family: 'Rajdhani', sans-serif;
+  }
+  .leaflet-popup-tip { background: var(--rail-panel); }
+  .leaflet-popup-content { margin: 10px 14px; font-size: 14px; }
+  .leaflet-popup-content strong { color: var(--rail-accent); }
+  .leaflet-container { background: #080d18; }
+  .leaflet-control-zoom a {
+    background: var(--rail-panel) !important;
+    border-color: var(--rail-border) !important;
+    color: var(--rail-white) !important;
+  }
+  .leaflet-control-attribution {
+    background: rgba(10,14,26,0.8) !important;
+    color: var(--rail-text) !important;
+    font-size: 10px !important;
+  }
+
+  .km-label {
+    background: none;
+    border: none;
+    color: var(--rail-yellow);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    white-space: nowrap;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.8);
+    font-weight: bold;
+  }
+
+  .gare-label {
+    background: none;
+    border: none;
+    color: white;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-shadow: 1px 1px 3px rgba(0,0,0,1), 0 0 6px rgba(0,0,0,0.8);
+    letter-spacing: 0.5px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-badge">SNCF</div>
+    <div class="logo-title">Carte Ferroviaire</div>
+  </div>
+  <div class="status-bar">
+    <div class="status-item">
+      <div class="dot searching" id="gps-dot"></div>
+      <span id="gps-status">Localisation...</span>
+    </div>
+    <div class="status-item">
+      <div class="dot active"></div>
+      <span>OpenRailwayMap</span>
+    </div>
+  </div>
+</header>
+
+<div id="map-container">
+  <div id="map"></div>
+
+  <div id="alert-box" id="alert-box"></div>
+
+  <div id="info-panel">
+    <div class="panel-header">◈ Ma Position</div>
+    <div class="panel-body">
+      <div class="info-row">
+        <span class="info-label">Latitude</span>
+        <span class="info-value highlight" id="lat-val">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Longitude</span>
+        <span class="info-value highlight" id="lng-val">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Précision GPS</span>
+        <span class="info-value alert" id="acc-val">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Vitesse</span>
+        <span class="info-value" id="speed-val">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Cap</span>
+        <span class="info-value" id="heading-val">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Mise à jour</span>
+        <span class="info-value" id="time-val">—</span>
+      </div>
+    </div>
+    <div class="panel-header" style="margin-top:4px">◈ Couches Actives</div>
+    <div class="panel-body">
+      <div class="info-row">
+        <span class="info-label">Lignes ferroviaires</span>
+        <span class="info-value" style="color:var(--rail-green)">✓ ORM</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Gares / Haltes</span>
+        <span class="info-value" style="color:var(--rail-green)">✓ OSM</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Points kilométriques</span>
+        <span class="info-value" style="color:var(--rail-green)">✓ OSM</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="legend">
+    <div class="panel-header">Légende</div>
+    <div class="legend-item">
+      <div class="legend-line" style="background:#e63027"></div>
+      <span>Ligne principale</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-line" style="background:#ff9800"></div>
+      <span>Ligne secondaire</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-line" style="background:#607d8b; height:2px"></div>
+      <span>Voie de service</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#4fc3f7; border-color:#4fc3f7"></div>
+      <span>Ma position</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:transparent; border-color:#ffd54f"></div>
+      <span>Point kilométrique</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:white; border-color:#aaa"></div>
+      <span>Gare / Halte</span>
+    </div>
+  </div>
+
+  <div id="zoom-info">Zoom: <span id="zoom-level">—</span></div>
+</div>
+
+<script>
+// ─── CARTE ───────────────────────────────────────────────────────────────────
+const map = L.map('map', {
+  center: [46.8, 2.3],
+  zoom: 8,
+  zoomControl: true,
+  attributionControl: true
+});
+
+// Fond de carte sombre (Carto Dark)
+const baseTile = L.tileLayer(
+  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  {
+    attribution: '© OpenStreetMap © CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }
+).addTo(map);
+
+// Couche OpenRailwayMap – Lignes
+const railStandard = L.tileLayer(
+  'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+  {
+    attribution: '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>',
+    maxZoom: 19,
+    opacity: 0.85
+  }
+).addTo(map);
+
+// Couche OpenRailwayMap – Points kilométriques (maxspeed layer shows km markers)
+const railMaxspeed = L.tileLayer(
+  'https://{s}.tiles.openrailwaymap.org/maxspeed/{z}/{x}/{y}.png',
+  {
+    attribution: '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>',
+    maxZoom: 19,
+    opacity: 0.7
+  }
+).addTo(map);
+
+// Mise à jour affichage zoom
+map.on('zoomend', () => {
+  document.getElementById('zoom-level').textContent = map.getZoom();
+});
+document.getElementById('zoom-level').textContent = map.getZoom();
+
+// ─── MARQUEUR POSITION ────────────────────────────────────────────────────────
+const positionIcon = L.divIcon({
+  className: '',
+  html: `<div style="
+    width:22px; height:22px;
+    border-radius:50%;
+    border:3px solid #4fc3f7;
+    background:rgba(79,195,247,0.25);
+    box-shadow:0 0 0 0 rgba(79,195,247,0.7);
+    animation:position-pulse 2s infinite;
+    position:relative;
+  ">
+    <div style="
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      width:8px; height:8px;
+      border-radius:50%;
+      background:#4fc3f7;
+    "></div>
+  </div>`,
+  iconSize: [22, 22],
+  iconAnchor: [11, 11]
+});
+
+let positionMarker = null;
+let accuracyCircle = null;
+let firstFix = true;
+
+// ─── GARES (Overpass API) ─────────────────────────────────────────────────────
+const stationLayer = L.layerGroup().addTo(map);
+let stationFetchBounds = null;
+
+const stationIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:10px;height:10px;border-radius:50%;background:white;border:2px solid #aaa;"></div>`,
+  iconSize: [10, 10],
+  iconAnchor: [5, 5]
+});
+
+async function fetchStations(bounds) {
+  const b = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+  const query = `
+    [out:json][timeout:15];
+    (
+      node["railway"="station"](${b});
+      node["railway"="halt"](${b});
+      node["railway"="stop"](${b});
+    );
+    out body;
+  `;
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: 'data=' + encodeURIComponent(query)
+    });
+    const data = await res.json();
+    stationLayer.clearLayers();
+
+    data.elements.forEach(el => {
+      if (!el.lat || !el.lon) return;
+      const name = el.tags.name || el.tags['name:fr'] || '';
+      const type = el.tags.railway;
+
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="
+          width:${type === 'station' ? 12 : 8}px;
+          height:${type === 'station' ? 12 : 8}px;
+          border-radius:50%;
+          background:${type === 'station' ? 'white' : '#90a4ae'};
+          border:2px solid ${type === 'station' ? '#ccc' : '#607d8b'};
+        "></div>`,
+        iconSize: [type === 'station' ? 12 : 8, type === 'station' ? 12 : 8],
+        iconAnchor: [type === 'station' ? 6 : 4, type === 'station' ? 6 : 4]
+      });
+
+      const marker = L.marker([el.lat, el.lon], { icon });
+
+      if (name && map.getZoom() >= 10) {
+        const labelIcon = L.divIcon({
+          className: 'gare-label',
+          html: name,
+          iconAnchor: [-8, 4]
+        });
+        L.marker([el.lat, el.lon], { icon: labelIcon }).addTo(stationLayer);
+      }
+
+      marker.bindPopup(`
+        <strong>${name || 'Sans nom'}</strong><br>
+        Type : ${type}<br>
+        <small>${el.lat.toFixed(5)}, ${el.lon.toFixed(5)}</small>
+      `);
+      marker.addTo(stationLayer);
+    });
+  } catch(e) {
+    console.warn('Erreur Overpass:', e);
+  }
+}
+
+// Chargement des gares à chaque déplacement de carte (dézoom suffisant)
+map.on('moveend', () => {
+  const zoom = map.getZoom();
+  if (zoom >= 9) {
+    const bounds = map.getBounds();
+    fetchStations(bounds);
+  } else {
+    stationLayer.clearLayers();
+  }
+});
+
+// ─── GPS ──────────────────────────────────────────────────────────────────────
+function showAlert(msg) {
+  const box = document.getElementById('alert-box');
+  box.textContent = msg;
+  box.style.display = 'block';
+}
+
+function hideAlert() {
+  document.getElementById('alert-box').style.display = 'none';
+}
+
+function formatHeading(deg) {
+  if (deg === null || isNaN(deg)) return '—';
+  const dirs = ['N','NE','E','SE','S','SO','O','NO'];
+  return dirs[Math.round(deg / 45) % 8] + ` (${Math.round(deg)}°)`;
+}
+
+function onPosition(pos) {
+  hideAlert();
+  document.getElementById('gps-dot').className = 'dot active';
+  document.getElementById('gps-status').textContent = 'GPS actif';
+
+  const { latitude: lat, longitude: lng, accuracy, speed, heading } = pos.coords;
+  const now = new Date();
+
+  // Panel
+  document.getElementById('lat-val').textContent = lat.toFixed(6) + '°';
+  document.getElementById('lng-val').textContent = lng.toFixed(6) + '°';
+  document.getElementById('acc-val').textContent = accuracy ? `±${Math.round(accuracy)} m` : '—';
+  document.getElementById('speed-val').textContent = speed !== null ? `${(speed * 3.6).toFixed(1)} km/h` : '—';
+  document.getElementById('heading-val').textContent = formatHeading(heading);
+  document.getElementById('time-val').textContent = now.toLocaleTimeString('fr-FR');
+
+  const latlng = L.latLng(lat, lng);
+
+  // Cercle précision
+  if (accuracyCircle) accuracyCircle.remove();
+  accuracyCircle = L.circle(latlng, {
+    radius: accuracy,
+    color: '#4fc3f7',
+    fillColor: '#4fc3f7',
+    fillOpacity: 0.05,
+    weight: 1,
+    dashArray: '4 4'
+  }).addTo(map);
+
+  // Marqueur position
+  if (positionMarker) {
+    positionMarker.setLatLng(latlng);
+  } else {
+    positionMarker = L.marker(latlng, { icon: positionIcon, zIndexOffset: 1000 })
+      .addTo(map)
+      .bindPopup(`<strong>Ma position</strong><br>${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+  }
+
+  // Centrer la carte au premier fix
+  if (firstFix) {
+    map.setView(latlng, 13);
+    firstFix = false;
+    // Charger les gares dans la zone
+    fetchStations(map.getBounds());
+  }
+}
+
+function onError(err) {
+  document.getElementById('gps-dot').className = 'dot';
+  document.getElementById('gps-dot').style.background = '#e63027';
+  document.getElementById('gps-status').textContent = 'GPS indisponible';
+
+  let msg = 'Géolocalisation impossible. ';
+  if (err.code === 1) msg += 'Permission refusée — autorisez la localisation dans votre navigateur.';
+  else if (err.code === 2) msg += 'Position indisponible.';
+  else if (err.code === 3) msg += 'Délai dépassé.';
+  showAlert(msg);
+
+  // Afficher la France quand même
+  map.setView([46.8, 2.3], 7);
+}
+
+if ('geolocation' in navigator) {
+  navigator.geolocation.watchPosition(onPosition, onError, {
+    enableHighAccuracy: true,
+    timeout: 15000,
+    maximumAge: 5000
+  });
+} else {
+  showAlert('La géolocalisation n\'est pas supportée par votre navigateur.');
+  map.setView([46.8, 2.3], 7);
+}
+</script>
+</body>
+</html>
